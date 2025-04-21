@@ -1,14 +1,21 @@
-# nuclear_explosions_analysis.py
+"""
+CS230 Final Project
+April 20, 2025
+Matthew Gooch
+
+This program will analyze and chart out information from a dataset using streamlit, pandas, pyplot, and pydeck
+"""
+
+# Import all tools
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import pydeck as pdk
 
-# --------------------------
-# DATA PREPARATION & CLEANING
-# --------------------------
 
-COUNTRY_MAPPING = {
+# Data Dictionaries
+
+COUNTRIES = {
     'USA': 'United States',
     'USSR': 'Soviet Union',
     'UK': 'United Kingdom',
@@ -17,179 +24,222 @@ COUNTRY_MAPPING = {
     'INDIA': 'India'
 }
 
+PURPOSE_DICT = {
+    'Combat': 'Combat',
+    'Wr': 'Weapons development',
+    'We': 'Weapons Evaluation',
+    'Fms': 'Soviet Phenomenon Study',
+    'Me': 'Military Exercise',
+    'Pne': 'Peaceful Nuclear Explosion',
+    'Sam': 'Soviet Emergency Test',
+    'Se': 'Safety Testing',
+    'Transp': 'Transportation purposes'
+}
+
+TYPE_DICT = {
+    'Atmosph': 'Atmospheric',
+    'Airdrop': 'Airplane Deployed',
+    'Tower': 'Constructed Tower',
+    'Surface': 'Ground Level',
+    'UW': 'Underwater',
+    'Shaft': 'Underground Shaft',
+    'Tunnel': 'Underground Tunnel',
+    'Barge': 'Barge Platform',
+    'Balloon': 'Aerial Balloon',
+    'Rocket': 'Missile Launch',
+    'Ship': 'Naval Vessel',
+    'Crater': 'Surface Crater'
+}
+
+
+# Data Processing
 
 def load_and_clean_data():
-    """Load and preprocess nuclear explosions data"""
     df = pd.read_csv("nuclear_explosions.csv")
 
-    # Rename columns to match code expectations
-    df.rename(columns={
+    # Column renaming
+    df = df.rename(columns={
         'WEAPON SOURCE COUNTRY': 'Country',
         'Data.Purpose': 'Purpose',
+        'Data.Type': 'Type',
         'Location.Cordinates.Latitude': 'Latitude',
         'Location.Cordinates.Longitude': 'Longitude',
         'Data.Yeild.Lower': 'Yield'
-    }, inplace=True)
+    })
 
-    # Create proper date column from components
+    # Date handling
     df['Date'] = pd.to_datetime(
         df[['Date.Year', 'Date.Month', 'Date.Day']].rename(columns={
             'Date.Year': 'year',
             'Date.Month': 'month',
             'Date.Day': 'day'
-        }),
-        errors='coerce'
+        })
     )
-
-    # Extract temporal features using pandas
     df['Year'] = df['Date'].dt.year
-    df['Month'] = df['Date'].dt.month_name()
     df['Decade'] = (df['Year'] // 10) * 10
 
-    # Clean country names using mapping
-    df['Country'] = df['Country'].apply(
-        lambda x: COUNTRY_MAPPING.get(x, x)
-    )
-
-    # Handle missing values in Yield
-    df['Yield'] = df['Yield'].fillna(0).astype(float)
+    # Data enrichment
+    df['Country'] = df['Country'].map(COUNTRIES).fillna('Other')
+    df['Purpose_Label'] = df['Purpose'].map(PURPOSE_DICT).fillna('Other')
+    df['Type_Label'] = df['Type'].map(TYPE_DICT).fillna('Other')
 
     return df
 
 
-def filter_dataset(df, start_date, end_date):
-    """Filter data by date range using pandas Timestamps"""
-    return df[
-        (df['Date'] >= pd.to_datetime(start_date)) &
-        (df['Date'] <= pd.to_datetime(end_date))
-        ]
-
-
-# --------------------------
-# STREAMLIT UI
-# --------------------------
+# Main function
 
 def main():
+    #Streamlit Configuration
     st.set_page_config(
         page_title="Nuclear Detonation Explorer",
-        page_icon="💥",
         layout="wide"
     )
 
-    st.title("☢️ Nuclear Detonation Analysis (1945-1998)")
-    st.sidebar.header("Control Panel")
-
+    st.title("Nuclear Detonation Analysis (1945-1998)")
     df = load_and_clean_data()
 
+    with st.sidebar:
+        st.header("Control Panel")
+
+        # Date Range
+        min_date = df['Date'].min().date()
+        max_date = df['Date'].max().date()
+        selected_dates = st.date_input(
+            "Select Date Range",
+            value=(min_date, max_date),
+            min_value=min_date,
+            max_value=max_date
+        )
+
+        # Country Selection
+        st.subheader("Country Selection")
+        all_countries = sorted(df['Country'].unique())
+
+        # Select All functionality
+        if st.button('Select All Countries'):
+            st.session_state.selected_countries = all_countries
+
+        selected_countries = st.multiselect(
+            "Choose Countries",
+            options=all_countries,
+            default=all_countries,
+            key='selected_countries'
+        )
+
+        # Purpose Selection
+        st.subheader("Detonation Purpose")
+        purpose_options = sorted(df['Purpose_Label'].unique())
+        selected_purposes = st.multiselect(
+            "Select Purposes",
+            options=purpose_options,
+            default=purpose_options
+        )
+
+        # Type Selection
+        st.subheader("Detonation Type")
+        type_options = sorted(df['Type_Label'].unique())
+        selected_types = st.multiselect(
+            "Select Types",
+            options=type_options,
+            default=type_options
+        )
+
     # -------------------
-    # INTERACTIVE WIDGETS
+    # DATA FILTERING
     # -------------------
-
-    # Date range selector
-    min_date = df['Date'].min().date()
-    max_date = df['Date'].max().date()
-    selected_dates = st.sidebar.date_input(
-        "Select Date Range",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date
-    )
-
-    # Purpose multi-select
-    purposes = st.sidebar.multiselect(
-        "Select Detonation Purposes",
-        options=df['Purpose'].unique(),
-        default=["Wr", "We"]
-    )
-
-    # Country radio buttons
-    selected_country = st.sidebar.radio(
-        "Focus Country",
-        options=sorted(df['Country'].unique())
-    )
-
-    # -------------------
-    # DATA PROCESSING
-    # -------------------
-
-    # Multi-condition filtering
     filtered_df = df[
-        (df['Purpose'].isin(purposes)) &
-        (df['Country'] == selected_country)
+        (df['Country'].isin(selected_countries)) &
+        (df['Purpose_Label'].isin(selected_purposes)) &
+        (df['Type_Label'].isin(selected_types))
         ]
 
-    # Apply date filtering
     if len(selected_dates) == 2:
-        filtered_df = filter_dataset(filtered_df, selected_dates[0], selected_dates[1])
+        filtered_df = filtered_df[
+            (filtered_df['Date'] >= pd.to_datetime(selected_dates[0])) &
+            (filtered_df['Date'] <= pd.to_datetime(selected_dates[1]))
+            ]
 
-    # -------------------
-    # VISUALIZATIONS
-    # -------------------
 
-    # Temporal Analysis
-    st.subheader("Detonation Timeline")
-    fig, ax = plt.subplots(figsize=(10, 4))
+    # Visualizations
 
-    time_series = filtered_df.resample('Y', on='Date').size()
+    col1, col2 = st.columns([2, 1])
 
-    ax.plot(time_series.index.year, time_series.values,
-            color='#ff4b4b', marker='o', linestyle='--')
-    ax.set_title("Nuclear Detonations Timeline", fontsize=14, pad=15)
-    ax.set_xlabel("Year", fontsize=10)
-    ax.set_ylabel("Number of Detonations", fontsize=10)
-    ax.grid(True, alpha=0.3)
-    st.pyplot(fig)
+    with col1:
+        # Global Map
+        st.subheader("Global Detonation Map")
+        layer = pdk.Layer(
+            "ScatterplotLayer",
+            data=filtered_df,
+            get_position=['Longitude', 'Latitude'],
+            get_radius=50000,
+            get_fill_color=[255, 75, 75, 180],
+            pickable=True
+        )
+        #USED STACK OVERFLOW ARTICLE ABOUT MAKING CHARTS FOR FORMATTING HELP AND WAYS TO MAKE CHARTS LOOK BETTTER
+        st.pydeck_chart(pdk.Deck(
+            map_style='mapbox://styles/mapbox/dark-v10',
+            initial_view_state=pdk.ViewState(
+                latitude=30,
+                longitude=0,
+                zoom=1,
+                pitch=40
+            ),
+            layers=[layer]
+        ))
 
-    # PyDeck Map
-    st.subheader("Global Detonation Map")
-    layer = pdk.Layer(
-        "ScatterplotLayer",
-        data=filtered_df,
-        get_position=['Longitude', 'Latitude'],
-        get_radius=50000,
-        get_fill_color=[255, 75, 75, 180],
-        pickable=True
-    )
+        # Static Country Totals
+        st.subheader("Total Detonations by Country (1945-1998)")
+        country_counts = df['Country'].value_counts().sort_values(ascending=False)
+        fig, ax = plt.subplots(figsize=(10, 4))
+        country_counts.plot(kind='bar', color='#ff7f7f', edgecolor='#ff4b4b', ax=ax)
+        ax.set_title("Nuclear Tests by Country", fontsize=16)
+        ax.set_xlabel("Country", fontsize=12)
+        ax.set_ylabel("Number of Detonations", fontsize=12)
+        ax.tick_params(axis='x', rotation=45)
+        ax.grid(axis='y', alpha=0.3)
+        for i in range(len(country_counts)):
+            v = country_counts[i]
+            ax.text(i, v + 2, str(v), ha='center', va='bottom', fontsize=9)
+        st.pyplot(fig)
 
-    st.pydeck_chart(pdk.Deck(
-        map_style='mapbox://styles/mapbox/dark-v10',
-        initial_view_state=pdk.ViewState(
-            latitude=30,
-            longitude=0,
-            zoom=1,
-            pitch=40
-        ),
-        layers=[layer],
-        tooltip={
-            "html": """
-            <b>Country:</b> {Country}<br>
-            <b>Date:</b> {Date}<br>
-            <b>Yield:</b> {Yield} kt
-            """
-        }
-    ))
+    with col2:
+        # Statistics
+        st.subheader("Summary Statistics")
+        st.metric("Total Detonations", len(filtered_df))
+        st.metric("Average Yield", f"{filtered_df['Yield'].mean():.1f} kt")
+        st.metric("Maximum Yield", f"{filtered_df['Yield'].max():.1f} kt")
 
-    # -------------------
-    # DATA ANALYTICS
-    # -------------------
+        # Temporal Analysis
+        st.subheader("Detonations Timeline")
+        time_series = filtered_df.resample('Y', on='Date').size()
+        fig2, ax2 = plt.subplots(figsize=(10, 4))
+        ax2.plot(time_series.index.year, time_series.values,
+                 color='#ff4b4b', marker='o', linestyle='--')
+        ax2.set_xlabel("Year", fontsize=10)
+        ax2.set_ylabel("Detonations", fontsize=10)
+        ax2.grid(True, alpha=0.3)
+        st.pyplot(fig2)
 
-    # Yield categorization
-    filtered_df['Yield Category'] = pd.cut(
-        filtered_df['Yield'],
-        bins=[0, 1, 10, 100, 1000, float('inf')],
-        labels=['<1kt', '1-10kt', '10-100kt', '100-1000kt', '>1000kt']
-    )
+    # Additional Charts
+    st.subheader("Detailed Breakdown")
+    col3, col4 = st.columns(2)
 
-    # Error handling for stats
-    try:
-        total = len(filtered_df)
-        max_yield = filtered_df['Yield'].max()
-        avg_yield = filtered_df['Yield'].mean()
-        st.metric(f"Total {selected_country} Detonations", total)
-        st.metric("Largest Yield", f"{max_yield:,.1f} kt")
-        st.metric("Average Yield", f"{avg_yield:,.1f} kt")
-    except Exception as e:
-        st.error(f"Error calculating statistics: {str(e)}")
+    with col3:
+        # Purpose Distribution
+        st.write("### Purpose Distribution")
+        purpose_counts = filtered_df['Purpose_Label'].value_counts()
+        fig3, ax3 = plt.subplots()
+        purpose_counts.plot(kind='pie', autopct='%1.1f%%', ax=ax3)
+        st.pyplot(fig3)
+
+    with col4:
+        # Type Distribution
+        st.write("### Detonation Types")
+        type_counts = filtered_df['Type_Label'].value_counts()
+        fig4, ax4 = plt.subplots()
+        type_counts.plot(kind='barh', color='#ff4b4b', ax=ax4)
+        ax4.set_xlabel("Number of Detonations")
+        st.pyplot(fig4)
 
 
 if __name__ == "__main__":
